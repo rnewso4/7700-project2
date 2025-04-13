@@ -3,61 +3,70 @@ import torch.nn as nn
 
 # Define a simple transformer-based language model
 class TransformerLanguageModel(nn.Module):
-    def __init__(self, vocab_size, d_model=512, nhead=8, num_encoder_layers=6, dim_feedforward=2048):
+    def __init__(self, vocab_size, d_model=360, nhead=6, num_encoder_layers=3, dim_feedforward=512):
         super(TransformerLanguageModel, self).__init__()
-        self.embedding = nn.Embedding(vocab_size, d_model)
-        # self.positional_encoding = nn.Parameter(torch.zeros(1, max_seq_length, d_model))
-        # self.transformer = nn.Transformer(d_model, nhead, num_encoder_layers, num_decoder_layers, dim_feedforward, batch_first=True)
-        self.transformer_encoder = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(d_model, nhead, dim_feedforward, batch_first=True),
-            num_layers=num_encoder_layers
+
+        # Embedding layer for tokens
+        self.token_embedding = nn.Embedding(vocab_size, d_model)
+
+        # Positional Encoding
+        self.positional_encoding = PositionalEncoding(d_model)
+
+        # Transformer Encoder
+        self.encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=nhead,
+            dim_feedforward=dim_feedforward,
+            dropout=0.1
         )
-        self.fc_out = nn.Linear(d_model, vocab_size)
+        self.transformer_encoder = nn.TransformerEncoder(self.encoder_layer, num_layers=num_encoder_layers)
+
+        # Output projection to vocabulary size
+        self.output_layer = nn.Linear(d_model, vocab_size)
+
+        # Initialization
+        #self._init_weights()
+
 
     def forward(self, src, src_mask=None):
-        embedded = self.embedding(src)
-        output = self.transformer_encoder(embedded, mask=src_mask)
-        output = self.fc_out(output)
-        return output, None
-        #tgt = self.embedding(tgt) + self.positional_encoding[:, :tgt.size(1), :]
-        #output = self.transformer(src, tgt)
-        # output = self.fc_out(output)
-        # return output, None
+        """
+        Forward pass for the transformer language model.
+
+        :param input_ids: Tensor of token IDs (batch_size, seq_len).
+        :return: Logits for the vocabulary (batch_size, seq_len, vocab_size).
+        """
+        # Embed tokens and scale by sqrt(d_model)
+        x = self.token_embedding(src) * (self.token_embedding.embedding_dim ** 0.5)
+
+        # Add positional encodings
+        seq_length = x.size(1)
+        #x += self.positional_encoding[:seq_length, :]
+        x = self.positional_encoding(x)
+
+        # Pass through transformer encoder
+        x = self.transformer_encoder(x)
+
+        # Project to vocabulary size
+        logits = self.output_layer(x)
+
+        return logits, None
     
-    def predict_next_token(self, input_ids, temperature=1.0):
+    def predict_next_token(self, input_ids, temperature):
         """
         Predict the next token ID (and hidden state) from the last token in input_ids.
         :param input_ids: Input sequence token IDS
         :param temperature: temperature setting for sampling:
         :return: next token ID, hidden state
         """
-     # Ensure the model is in evaluation mode
+
         self.eval()
-
-        # Convert input_ids to tensor if not already
-        if not isinstance(input_ids, torch.Tensor):
-            input_ids = torch.tensor(input_ids, dtype=torch.long, device="mps").unsqueeze(0)  # Add batch dimension
-
         hidden = None
         with torch.no_grad():
-            # Pass input_ids through the transformer model
             logits, hidden = self.forward(input_ids, hidden) # 32 is the batch size
-
-            # Get the logits for the last token in the sequence
-            last_token_logits = logits[:, -1, :]
-
-            # Apply temperature scaling
-            scaled_logits = last_token_logits / temperature
-
-            # Apply softmax to get probabilities
-            probs = torch.softmax(scaled_logits, dim=-1)
-
-            # Sample the next token ID from the probability distribution
-            next_token_id = torch.multinomial(probs, num_samples=1)
-
-        return next_token_id.item(), hidden
+            next_token_id = top_p_sampling(logits[0, -1, :], p=temperature)
+            return next_token_id.item(), hidden
         
-    def generate(self, tokenizer, prompt, max_length=50, eos_token_id=None, temperature=1.0, device='mps'):
+    def generate(self, tokenizer, prompt, max_length=50, eos_token_id=None, temperature=0.9, device='mps'):
         """
         Generate a full ouput sequence given a prompt.
 
@@ -93,3 +102,55 @@ class TransformerLanguageModel(nn.Module):
 
         # decode generated token IDs into tokens
         return tokenizer.decode(generated_ids, out_type=str)
+
+ # Define top-p sampling function
+def top_p_sampling(output_logits, p=0.9):
+    """
+    Perform top-p (nucleus) sampling on the output logits.
+    Args:
+        output_logits (Tensor): The logits output from the model (shape: [vocab_size]).
+        p (float): The cumulative probability threshold for top-p sampling.
+    Returns:
+        int: The sampled token index.
+    """
+    # Apply softmax to get probabilities
+    probs = torch.softmax(output_logits, dim=-1)
+
+    # Sort probabilities and indices in descending order
+    sorted_probs, sorted_indices = torch.sort(probs, descending=True)
+
+    # Calculate cumulative probabilities
+    cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
+
+    # Find the cutoff index where cumulative probability exceeds 'p'
+    cutoff_index = torch.where(cumulative_probs > p)[0][0]
+
+    # Keep only the top-p tokens
+    top_p_probs = sorted_probs[:cutoff_index + 1]
+    top_p_indices = sorted_indices[:cutoff_index + 1]
+
+    # Normalize the top-p probabilities
+    top_p_probs /= top_p_probs.sum()
+
+    # Sample from the top-p tokens
+    sampled_index = torch.multinomial(top_p_probs, 1).item()
+    return top_p_indices[sampled_index]
+
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model, dropout=0.1, max_len=512):
+        super(PositionalEncoding, self).__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float32).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-torch.log(torch.tensor(10000.0)) / d_model))
+
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+
+        pe = pe.unsqueeze(0)  # (1, max_len, d_model)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        x = x + self.pe[:, :x.size(1), :]
+        return self.dropout(x)

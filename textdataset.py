@@ -85,7 +85,7 @@ class TextDataSet(Dataset):
     # Instantiate our model and move it to the correct device memory
 
     # Using AdamW optimizer on the trainable params. This is a standard for LMs
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
 
     # going to use a learning rate scheduler that reduces LR by half after stagnation for 1 epoch
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', factor=0.5, patience=1)
@@ -103,8 +103,6 @@ class TextDataSet(Dataset):
       model.train() # set the model to training mode
       total_train_loss = 0 # keep track of training loss total
       total_val_loss = 0
-      print(f"Epoch {ep+1}/{3}\n-------------------------------")
-      print(f"Length of training set: {len(train_loader)}")
 
       # loop through each sample batch in training
       for input_ids, target_ids in train_loader:
@@ -124,11 +122,11 @@ class TextDataSet(Dataset):
         optimizer.step()
 
         # Step the scheduler based on validation loss
-        scheduler.step(loss)
+        #scheduler.step(loss)
 
         total_train_loss += loss.item()
-
       avg_train_loss = total_train_loss / len(train_loader)
+      scheduler.step(avg_train_loss)
       train_losses.append(avg_train_loss)
 
       # validation
@@ -147,7 +145,7 @@ class TextDataSet(Dataset):
       avg_val_loss = total_val_loss / len(val_loader)
       val_losses.append(avg_val_loss)
 
-      print(f"Epoch {ep+1}/{3}, Training Loss: {avg_train_loss:.4f} | Validation loss: {avg_val_loss}")
+      print(f"Epoch {ep+1}, Training Loss: {avg_train_loss:.4f} | Validation loss: {avg_val_loss:.4f}")
     
     # Calculate training time
     train_time_end = timer()

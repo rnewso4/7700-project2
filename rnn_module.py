@@ -3,7 +3,7 @@ import torch.nn as nn
 
 
 class RNNModule(nn.Module):
-    def __init__(self, vocab_size, embed_dim=300, hidden_dim=256, num_layers=2, dropout=0.2, pad_token_id=0):
+    def __init__(self, vocab_size, embed_dim=300, hidden_dim=512, num_layers=3, dropout=0.4, pad_token_id=0):
         """
         Create a Gated Recurrent Unit Language Model
         :param vocab_size: size of the vocabulary
@@ -19,7 +19,7 @@ class RNNModule(nn.Module):
         self.embedding = nn.Embedding(vocab_size, embed_dim, padding_idx=pad_token_id)
 
         #define stacked rnn
-        self.rnn = nn.RNN(embed_dim, hidden_dim, num_layers, dropout=dropout, batch_first=True, nonlinearity='relu')
+        self.rnn = nn.RNN(embed_dim, hidden_dim, num_layers, dropout=dropout, batch_first=True)#, nonlinearity='relu')
         
         # output layer that maps hidden state of final rnn to output
         self.fc = nn.Linear(hidden_dim, vocab_size)

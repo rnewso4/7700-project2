@@ -3,7 +3,7 @@ import torch.nn as nn
 
 
 class LSTMModule(nn.Module):
-    def __init__(self, vocab_size, embed_dim=256, hidden_dim=512, num_layers=6, dropout=0.2, pad_token_id=0):
+    def __init__(self, vocab_size, embed_dim=300, hidden_dim=512, num_layers=3, dropout=0.4, pad_token_id=0):
         """
         Create a Gated Recurrent Unit Language Model
         :param vocab_size: size of the vocabulary
@@ -47,7 +47,7 @@ class LSTMModule(nn.Module):
     #     """
     #     return torch.zeros(batch_size, 512).to("mps")
     
-    def predict_next_token(self, input_ids, temperature=1.0):
+    def predict_next_token(self, input_ids, temperature):
         """
         Predict the next token ID (and hidden state) from the last token in input_ids.
         :param input_ids: Input sequence token IDS
@@ -59,12 +59,10 @@ class LSTMModule(nn.Module):
         hidden = None
         with torch.no_grad():
             logits, hidden = self.forward(input_ids, hidden) # 32 is the batch size
-            logits = logits[:, -1, :] / temperature
-            probs = torch.softmax(logits, dim=-1)
-            next_token_id = torch.argmax(probs, dim=-1) # TODO: Greedy decoding. if we change this, we will not get repeating tokens
+            next_token_id = top_p_sampling(logits[0, -1, :], p=temperature)
             return next_token_id.item(), hidden
         
-    def generate(self, tokenizer, prompt, max_length=50, eos_token_id=None, temperature=1.0, device='mps'):
+    def generate(self, tokenizer, prompt, max_length=50, eos_token_id=None, temperature=0.9, device='mps'):
         """
         Generate a full ouput sequence given a prompt.
 
@@ -100,3 +98,36 @@ class LSTMModule(nn.Module):
 
         # decode generated token IDs into tokens
         return tokenizer.decode(generated_ids, out_type=str)
+    
+      # Define top-p sampling function
+def top_p_sampling(output_logits, p=0.9):
+    """
+    Perform top-p (nucleus) sampling on the output logits.
+    Args:
+        output_logits (Tensor): The logits output from the model (shape: [vocab_size]).
+        p (float): The cumulative probability threshold for top-p sampling.
+    Returns:
+        int: The sampled token index.
+    """
+    # Apply softmax to get probabilities
+    probs = torch.softmax(output_logits, dim=-1)
+
+    # Sort probabilities and indices in descending order
+    sorted_probs, sorted_indices = torch.sort(probs, descending=True)
+
+    # Calculate cumulative probabilities
+    cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
+
+    # Find the cutoff index where cumulative probability exceeds 'p'
+    cutoff_index = torch.where(cumulative_probs > p)[0][0]
+
+    # Keep only the top-p tokens
+    top_p_probs = sorted_probs[:cutoff_index + 1]
+    top_p_indices = sorted_indices[:cutoff_index + 1]
+
+    # Normalize the top-p probabilities
+    top_p_probs /= top_p_probs.sum()
+
+    # Sample from the top-p tokens
+    sampled_index = torch.multinomial(top_p_probs, 1).item()
+    return top_p_indices[sampled_index]
