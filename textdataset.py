@@ -1,6 +1,5 @@
 from torch.utils.data import Dataset, DataLoader
 import torch
-from gru_module import GRUModule
 import sentencepiece as spm
 import json
 from nltk.translate.bleu_score import corpus_bleu
@@ -8,7 +7,7 @@ from nltk.translate.bleu_score import SmoothingFunction
 from timeit import default_timer as timer
 
 class TextDataSet(Dataset):
-  def __init__(self, filepath, tokenizer, max_seq_len=128):
+  def __init__(self, filepath, tokenizer, max_seq_len=512):
     """
     Create a text dataset for PyTorch Dataset that handles our jsonl prompts+completions for Casual LM
     :param filepath: path to the jsonl file

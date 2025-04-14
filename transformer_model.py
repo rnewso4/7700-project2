@@ -17,7 +17,8 @@ class TransformerLanguageModel(nn.Module):
             d_model=d_model,
             nhead=nhead,
             dim_feedforward=dim_feedforward,
-            dropout=0.1
+            dropout=0.1,
+            batch_first=True
         )
         self.transformer_encoder = nn.TransformerEncoder(self.encoder_layer, num_layers=num_encoder_layers)
 
@@ -42,9 +43,8 @@ class TransformerLanguageModel(nn.Module):
         seq_length = x.size(1)
         #x += self.positional_encoding[:seq_length, :]
         x = self.positional_encoding(x)
-
         # Pass through transformer encoder
-        x = self.transformer_encoder(x)
+        x = self.transformer_encoder(x, src_mask)
 
         # Project to vocabulary size
         logits = self.output_layer(x)
